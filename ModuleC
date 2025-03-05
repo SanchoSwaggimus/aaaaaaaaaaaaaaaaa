@@ -1,0 +1,156 @@
+import psycopg2
+import pandas as pd
+SQL = """ SELECT * FROM tskv """
+connection = psycopg2.connect(database = "tourism",user = "univer", password = "univer", host = "127.0.0.1", port =5432 )
+
+tskv = pd.read_sql_query(SQL, connection)
+print(tskv.info())
+
+tskv.drop_duplicates()
+
+hotel = tskv[tskv['rubrics'] == "Гостиница"]
+hotel
+
+hotel = hotel[500:2000]
+hotel
+
+import spacy
+from spacy import load
+from spacy.lang.ru import Russian
+
+nlp = Russian()
+load_model = load("ru_core_news_sm")
+
+lemma = []
+
+for item in load_model.pipe(hotel['text'].values):
+    lemma.append(n.lemma_ for n in item)
+
+hotel['text'] = lemma
+
+import nltk
+from nltk.corpus import stopwords
+
+nltk.download('stopwords')
+stop_words = set(stopwords.words('russian'))
+
+stopwords_ru = stopwords.words("russian")
+hotel['text'] = hotel['text'].apply(lambda x:[item for item in x if item not in stopwords_ru])
+hotel['text'] = [' '.join(map(str, j)) for j in hotel['text']]
+
+hotel
+
+import re
+import nltk
+from nltk.corpus import stopwords
+
+nltk.download('stopwords')
+stop_words = set(stopwords.words('russian'))
+
+def clean_text(text):
+    if not isinstance(text, str):
+        return ""
+    text = text.lower()
+    text = re.sub(r'\d+', '', text)         # удаляем числа
+    text = re.sub(r'[^\w\s]', '', text)     # удаляем пунктуацию
+    words = text.split()
+    words = [word for word in words if word not in stop_words] # удаляем стоп-слова
+    return " ".join(words)
+
+hotel['clean_text'] = hotel['text'].apply(clean_text)
+hotel[['text', 'clean_text']]
+
+df = hotel
+df = df.drop(columns='text')
+df
+
+df = df.drop_duplicates(subset='clean_text')
+df
+
+test_df = df
+test_df
+
+# 0: NEUTRAL
+# 1: POSITIVE
+# 2: NEGATIVE
+
+from transformers import pipeline
+
+sentiment_analyzer = pipeline("text-classification", model="blanchefort/rubert-base-cased-sentiment", device=0)
+
+label = []
+score = []
+x = 0 
+for i in test_df['clean_text']:
+    result = sentiment_analyzer(df['clean_text'].tolist()[x])
+    label.append(result[0]['label'])
+    score.append(result[0]['score'])
+    x += 1
+    print(len(label)," -> ", len(score))
+
+test_df['label'] = label
+test_df['score'] = score
+test_df
+
+# 0: NEUTRAL
+# 1: POSITIVE
+# 2: NEGATIVE
+
+test_df['label'] = test_df['label'].replace("POSITIVE", 1)
+test_df['label'] = test_df['label'].replace("NEUTRAL", 0)
+test_df['label'] = test_df['label'].replace("NEGATIVE", 2)
+
+print(test_df.info())
+
+test_df
+
+test_df['clean_text']
+
+from sklearn.cluster import KMeans
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.preprocessing import StandardScaler
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+
+vectorizer = TfidfVectorizer()
+X = vectorizer.fit_transform(test_df['clean_text'])
+scaler = StandardScaler()
+
+kmeans = KMeans(n_clusters=3, random_state=42)
+clusters = kmeans.fit(X)
+
+X_scaler = scaler.fit_transform(X.toarray())
+
+plt.figure(figsize=(8,6))
+sns.scatterplot(x=X_scaler[:,0], y=X_scaler[:,1],hue=clusters, palette='viridis')
+plt.show()
+
+X_scaler
+
+from sklearn.model_selection import train_test_split
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.metrics import accuracy_score
+
+X = X_scaler
+
+y = test_df['label']
+X_train, X_test, y_train, y_test = train_test_split(X,y, test_size=0.2, random_state=42)
+
+print(X_train.shape)
+print(X_test.shape)
+print(y_train.shape)
+print(y_test.shape)
+
+knn = KNeighborsClassifier()
+knn.fit(X_train,y_train)
+
+predict = knn.predict(X_test)
+predict
+
+accurancy = accuracy_score(predict,y_test)
+accurancy
+
+import joblib
+
+joblib.dump(knn,'test_model.pkl')
